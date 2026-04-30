@@ -1,0 +1,48 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.vs/
+.vscode/
+*.DotSettings.user
+publish/
+
+## Environment files
+.env
+*.env.local
+
+## Logs
+logs/
+*.log
+
+## OS files
+.DS_Store
+Thumbs.db
+
+## IDE
+.idea/
+*.swp
+*.swo
+
+## Flutter
+**/build/
+**/.dart_tool/
+**/.packages
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/pubspec.lock
+**/.pub-cache/
+
+## Images uploaded by users
+SkillPath.WebAPI/wwwroot/images/uploads/
+
+## Database
+*.mdf
+*.ldf
+
+# Firebase
+firebase-service-account.json
+**/firebase-service-account.json
