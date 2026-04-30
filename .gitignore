@@ -42,3 +42,6 @@ SkillPath.WebAPI/wwwroot/images/uploads/
 ## Database
 *.mdf
 *.ldf
+
+# Firebase service account (keep local only)
+firebase-service-account.json
