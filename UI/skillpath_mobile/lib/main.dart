@@ -69,9 +69,9 @@ Future<void> _loadEnvAndInitStripe() async {
         } catch (_) {
           debugPrint('[MAIN] Using hardcoded fallback keys');
           globalStripePublishableKey =
-              'pk_test_YOUR_STRIPE_PUBLISHABLE_KEY_HERE';
+              'pk_test_51TRvTA9PC2svLpdcjr9zgKUEU28hpkUW5YVVYVexgjbsCKGwXRhVNBLMQI8ryNz6nVb86E8m4yJjE41Ja1q0VRQA00lpLHJb4K';
           globalStripeSecretKey =
-              'sk_test_YOUR_STRIPE_SECRET_KEY_HERE';
+              'sk_test_51TRvTA9PC2svLpdcNKAXJKMNo71658kMxG0s44ctfqKKKEeD9HkoPgCGg9uuFUUYUkQXH5RiPRIpOHX3u9QG5vWx00OzNplk0y';
         }
       } else {
         rethrow;
@@ -109,9 +109,9 @@ Future<void> _loadEnvAndInitStripe() async {
     } catch (_) {
       // dotenv access failed, use hardcoded fallback
       globalStripePublishableKey ??=
-          'pk_test_YOUR_STRIPE_PUBLISHABLE_KEY_HERE';
+          'pk_test_51TRvTA9PC2svLpdcjr9zgKUEU28hpkUW5YVVYVexgjbsCKGwXRhVNBLMQI8ryNz6nVb86E8m4yJjE41Ja1q0VRQA00lpLHJb4K';
       globalStripeSecretKey ??=
-          'sk_test_YOUR_STRIPE_SECRET_KEY_HERE';
+          'sk_test_51TRvTA9PC2svLpdcNKAXJKMNo71658kMxG0s44ctfqKKKEeD9HkoPgCGg9uuFUUYUkQXH5RiPRIpOHX3u9QG5vWx00OzNplk0y';
     }
 
     debugPrint('[MAIN] STRIPE_PUBLISHABLE_KEY loaded: ${globalStripePublishableKey != null}');
