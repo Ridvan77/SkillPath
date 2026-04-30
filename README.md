@@ -12,6 +12,7 @@ Platforma za pregled, rezervaciju i pohadjanje kurseva i radionica iz razlicitih
 | Mobilna aplikacija | Flutter (Android) |
 | Message Broker | RabbitMQ |
 | Email Worker | .NET 8.0 Worker Service + MailKit |
+| Push notifikacije | Firebase Cloud Messaging (FCM) |
 | Placanje | Stripe (sandbox) |
 | Autentifikacija | JWT Bearer |
 | Recommender sistem | User-based Collaborative Filtering |
@@ -33,12 +34,25 @@ dotnet --version
 flutter --version
 ```
 
+## Firebase konfiguracija (FCM)
+
+Aplikacija koristi Firebase Cloud Messaging za push notifikacije. Potrebno je podesiti sljedece:
+
+1. Kreirajte Firebase projekt na [https://console.firebase.google.com](https://console.firebase.google.com)
+2. Dodajte Android aplikaciju sa package name: `com.example.skillpath_mobile`
+3. Preuzmite `google-services.json` i postavite u `UI/skillpath_mobile/android/app/`
+4. U Firebase Console > Project Settings > Service Accounts, generisite privatni kljuc
+5. Sacuvajte kao `firebase-service-account.json` u `SkillPath.WebAPI/`
+6. Omogucite Cloud Messaging (V1) u Firebase Console > Project Settings > Cloud Messaging
+
+**Napomena:** Bez Firebase konfiguracije aplikacija ce raditi, ali push notifikacije nece biti dostupne.
+
 ## Pokretanje aplikacije
 
 ### Korak 1: Kloniranje repozitorija
 
 ```bash
-git clone https://github.com/ridvanzolja/SkillPath.git
+git clone https://github.com/Ridvan77/SkillPath.git
 cd SkillPath
 ```
 
@@ -93,6 +107,8 @@ Sacekajte da se svi servisi pokrenu (cca 30-60 sekundi). API automatski:
 - Kreira bazu podataka i tabele
 - Seed-uje referentne podatke (drzave, gradove, kategorije)
 - Kreira test korisnike i primjere podataka (kursevi, rezervacije, recenzije)
+- Inicijalizira Firebase Admin SDK (ako je `firebase-service-account.json` prisutan)
+- Pokrece pozadinski servis za zakazane notifikacije
 
 ### Korak 4: Provjera API-ja
 
@@ -120,32 +136,17 @@ Za fizicki Android uredaj, potrebno je zamijeniti API adresu sa IP adresom vaseg
 flutter run --dart-define=API_BASE_URL=http://VASA_IP:8080
 ```
 
-### Korak 6: Pokretanje desktop aplikacije (Windows)
+### Korak 6: Pokretanje desktop aplikacije
 
 ```bash
 cd UI/skillpath_desktop
 flutter clean
 flutter pub get
-flutter run -d windows
+flutter run -d macos    # za macOS
+flutter run -d windows  # za Windows
 ```
 
 Desktop aplikacija automatski koristi `http://localhost:8080` kao API adresu.
-
-### Korak 7 (opcionalno): Pokretanje na macOS-u
-
-Za razvoj na macOS-u, potrebno je omoguciti macOS platformu:
-
-```bash
-cd UI/skillpath_mobile
-flutter create --platforms=macos .
-flutter run -d macos
-```
-
-**Napomena:** Nakon `flutter create`, dodajte network entitlements u `macos/Runner/DebugProfile.entitlements`:
-```xml
-<key>com.apple.security.network.client</key>
-<true/>
-```
 
 ## Korisnicki podaci za pristup
 
@@ -165,10 +166,12 @@ SkillPath/
 ├── SkillPath.Model/              # Entiteti, DbContext, Enumi
 ├── SkillPath.Services/           # Poslovna logika, DTO-ovi, Interfejsi, Izuzeci
 ├── SkillPath.WebAPI/             # Kontroleri, Middleware, Konfiguracija, Seed
+│   └── firebase-service-account.json  # Firebase Admin SDK kljuc (nije u Git-u)
 ├── SkillPath.Worker/             # RabbitMQ email worker servis
 ├── UI/
 │   ├── skillpath_shared/         # Dijeljeni Flutter paket (modeli, provideri, API klijent)
 │   ├── skillpath_mobile/         # Flutter mobilna aplikacija (Student + Instructor)
+│   │   └── android/app/google-services.json  # Firebase Android konfig (nije u Git-u)
 │   └── skillpath_desktop/        # Flutter desktop aplikacija (Admin panel)
 ├── Dockerfile                    # Docker konfiguracija za API
 ├── docker-compose.yml            # Orkestracija svih servisa
@@ -195,19 +198,19 @@ SkillPath/
        ┌────────────────┐
        │  SkillPath API │ Port 8080
        │  (ASP.NET Core)│
-       └───┬────────┬───┘
-           │        │
-     ┌─────▼──┐  ┌──▼────────┐
-     │SQL     │  │ RabbitMQ  │
-     │Server  │  │ (Broker)  │
-     │Port    │  │ Port 5672 │
-     │1433    │  └──┬────────┘
-     └────────┘     │
-                 ┌──▼────────┐
-                 │  Email    │
-                 │  Worker   │
-                 │ (MailKit) │
-                 └───────────┘
+       └───┬────┬───┬───┘
+           │    │   │
+     ┌─────▼──┐ │ ┌─▼─────────┐
+     │SQL     │ │ │ RabbitMQ   │
+     │Server  │ │ │ (Broker)   │
+     │Port    │ │ │ Port 5672  │
+     │1433    │ │ └──┬─────────┘
+     └────────┘ │    │
+           ┌────▼──┐ ┌──▼────────┐
+           │Firebase│ │  Email    │
+           │  FCM   │ │  Worker   │
+           │(Push)  │ │ (MailKit) │
+           └────────┘ └───────────┘
 ```
 
 ### API servisi
@@ -218,7 +221,7 @@ Svi servisi su registrovani kao **Scoped** (osim RabbitMQ publishera koji je Sin
 
 **Naziv baze:** `IB210224`
 
-### Glavne tabele (12)
+### Glavne tabele (14)
 
 | # | Tabela | Opis |
 |---|--------|------|
@@ -230,10 +233,12 @@ Svi servisi su registrovani kao **Scoped** (osim RabbitMQ publishera koji je Sin
 | 6 | Review | Recenzije i ocjene kurseva |
 | 7 | ReviewHelpfulVote | Glasovi za korisne recenzije |
 | 8 | Notification | Obavijesti korisnicima |
-| 9 | News | Novosti/obavijesti platforme |
-| 10 | UserFavorite | Omiljeni kursevi korisnika |
-| 11 | UserCourseView | Pregledi kurseva (za recommender) |
-| 12 | ReservationStatusHistory | Audit trag promjena statusa |
+| 9 | UserFavorite | Omiljeni kursevi korisnika |
+| 10 | UserCourseView | Pregledi kurseva (za recommender) |
+| 11 | ReservationStatusHistory | Audit trag promjena statusa |
+| 12 | FcmToken | FCM tokeni uredjaja korisnika |
+| 13 | BroadcastNotification | Admin notifikacije (zakazane/poslane) |
+| 14 | News | Novosti/obavijesti platforme |
 
 ### Referentne tabele (3+)
 
@@ -250,20 +255,19 @@ Svi servisi su registrovani kao **Scoped** (osim RabbitMQ publishera koji je Sin
 | Controller | Ruta | Opis |
 |-----------|------|------|
 | AuthController | `/api/Auth` | Registracija, login, profil, promjena lozinke |
-| CourseController | `/api/Course` | CRUD kurseva, pretraga, filtriranje |
+| CourseController | `/api/Course` | CRUD kurseva, pretraga, filtriranje, upload slika |
 | CourseScheduleController | `/api/course-schedules` | Upravljanje terminima |
 | ReservationController | `/api/Reservation` | Kreiranje, potvrda, otkazivanje rezervacija |
 | PaymentController | `/api/Payment` | Stripe PaymentIntent kreiranje |
-| ReviewController | `/api/Review` | Recenzije, ocjene, korisni glasovi |
-| NotificationController | `/api/Notification` | Obavijesti, oznaci procitano |
+| ReviewController | `/api/Review` | Recenzije, ocjene, korisni glasovi, vidljivost |
+| NotificationController | `/api/Notification` | Obavijesti, FCM registracija, zakazivanje, admin pregled |
 | FavoriteController | `/api/Favorite` | Omiljeni kursevi |
 | RecommenderController | `/api/Recommender` | Personalizirane preporuke |
 | CategoryController | `/api/Category` | Kategorije kurseva |
 | CityController | `/api/City` | Gradovi |
 | CountryController | `/api/Country` | Drzave |
-| UserController | `/api/User` | Upravljanje korisnicima (admin) |
-| NewsController | `/api/News` | Novosti platforme |
-| ReportController | `/api/Report` | Izvjestaji (admin) |
+| UserController | `/api/User` | Upravljanje korisnicima i predavacima (admin) |
+| ReportController | `/api/Report` | Izvjestaji o predavacima i kategorijama (admin) |
 | DashboardController | `/api/Dashboard` | Statistike (admin) |
 
 ## Funkcionalnosti
@@ -275,6 +279,7 @@ Svi servisi su registrovani kao **Scoped** (osim RabbitMQ publishera koji je Sin
 - Pregled rezervacija (Aktivne/Zavrsene/Otkazane) sa otkazivanjem
 - Personalizirane preporuke (User-based Collaborative Filtering)
 - Recenzije sa zvjezdicama i "korisno" glasovima
+- Push notifikacije u realnom vremenu (Firebase Cloud Messaging)
 - Obavijesti sa detaljnim prikazom
 - Omiljeni kursevi
 - Profil sa uredivanjem i promjenom lozinke
@@ -284,18 +289,26 @@ Svi servisi su registrovani kao **Scoped** (osim RabbitMQ publishera koji je Sin
 - Pregled i uredivanje vlastitih kurseva
 - Raspored sa brojem upisanih studenata
 - Pregled recenzija na svoje kurseve
+- Push notifikacije u realnom vremenu
 - Profil
 
 ### Desktop aplikacija (Admin)
-- Dashboard sa preglednim statistikama
-- Upravljanje kursevima (CRUD)
-- Upravljanje korisnicima
-- Upravljanje rezervacijama
-- Moderacija recenzija
-- Kreiranje i slanje obavijesti (pojedinacno/grupno)
-- Upravljanje novostima
-- Generisanje izvjestaja sa PDF exportom
+- Dashboard sa preglednim statistikama i nedavnim rezervacijama
+- Upravljanje kursevima (CRUD, upload slika, rasporedi)
+- Upravljanje korisnicima (pregled, uredivanje, soft/hard brisanje)
+- Upravljanje predavacima (pregled, statistike kurseva, ocjene)
+- Upravljanje rezervacijama (potvrda, otkazivanje, filtriranje)
+- Moderacija recenzija (sakrivanje/prikazivanje, brisanje)
+- Upravljanje notifikacijama (kreiranje, zakazivanje, FCM push)
+- Generisanje izvjestaja sa PDF exportom (predavaci, kategorije)
 - Upravljanje kategorijama
+
+### Push notifikacije (Firebase Cloud Messaging)
+- Slanje push notifikacija korisnicima i predavacima u realnom vremenu
+- Zakazivanje notifikacija za odredjeni datum i vrijeme
+- Grupno slanje (svi korisnici, samo studenti, samo predavaci)
+- Automatsko registrovanje FCM tokena pri prijavi na mobilnu aplikaciju
+- Pozadinski servis za slanje zakazanih notifikacija
 
 ### Email obavijesti (via RabbitMQ → Worker → Gmail SMTP)
 - Registracija korisnika (dobrodoslica)
@@ -346,3 +359,6 @@ Android emulator koristi `10.0.2.2` umjesto `localhost`. Ovo je automatski konfi
 
 ### Gmail SMTP greska "Authentication Required"
 Provjerite da koristite Gmail App Password (16 karaktera, format: `xxxx xxxx xxxx xxxx`), ne obicnu lozinku.
+
+### Push notifikacije ne rade
+Provjerite da su `google-services.json` i `firebase-service-account.json` pravilno postavljeni. Firebase Cloud Messaging (V1) mora biti omogucen u Firebase Console.
