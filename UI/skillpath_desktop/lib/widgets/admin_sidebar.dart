@@ -60,6 +60,15 @@ class _AdminSidebarState extends State<AdminSidebar> {
   static const SidebarItem _categoriesItem = SidebarItem(
       label: 'Kategorije', icon: Icons.category_rounded, index: 8);
 
+  static const SidebarItem _citiesItem = SidebarItem(
+      label: 'Gradovi', icon: Icons.location_city_rounded, index: 9);
+
+  static const SidebarItem _countriesItem = SidebarItem(
+      label: 'Drzave', icon: Icons.flag_rounded, index: 10);
+
+  static const SidebarItem _newsItem = SidebarItem(
+      label: 'Vijesti', icon: Icons.newspaper_rounded, index: 11);
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -128,8 +137,11 @@ class _AdminSidebarState extends State<AdminSidebar> {
                 // Top-level items
                 for (final item in _topLevelItems) _buildNavItem(item),
 
-                // Categories
+                // Reference data
                 _buildNavItem(_categoriesItem),
+                _buildNavItem(_citiesItem),
+                _buildNavItem(_countriesItem),
+                _buildNavItem(_newsItem),
               ],
             ),
           ),

@@ -89,6 +89,7 @@ class _NewsManagementScreenState extends State<NewsManagementScreen> {
     final imageCtrl =
         TextEditingController(text: existing?.imageUrl ?? '');
     final isEdit = existing != null;
+    final formKey = GlobalKey<FormState>();
 
     showDialog(
       context: context,
@@ -97,26 +98,41 @@ class _NewsManagementScreenState extends State<NewsManagementScreen> {
         content: SizedBox(
           width: 500,
           child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleCtrl,
-                  decoration: const InputDecoration(labelText: 'Naslov'),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: contentCtrl,
-                  decoration: const InputDecoration(labelText: 'Sadrzaj'),
-                  maxLines: 6,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: imageCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'URL slike (opciono)'),
-                ),
-              ],
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: titleCtrl,
+                    decoration: const InputDecoration(labelText: 'Naslov'),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Naslov je obavezan';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: contentCtrl,
+                    decoration: const InputDecoration(labelText: 'Sadrzaj'),
+                    maxLines: 6,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Sadrzaj je obavezan';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: imageCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'URL slike (opciono)'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -127,6 +143,8 @@ class _NewsManagementScreenState extends State<NewsManagementScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+
               final body = {
                 'title': titleCtrl.text.trim(),
                 'content': contentCtrl.text.trim(),
@@ -199,7 +217,9 @@ class _NewsManagementScreenState extends State<NewsManagementScreen> {
           ),
           const SizedBox(height: 24),
           Expanded(
-            child: Container(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
               decoration: AppTheme.cardDecoration,
               child: _isLoading
                   ? const LoadingWidget()
@@ -216,6 +236,11 @@ class _NewsManagementScreenState extends State<NewsManagementScreen> {
                                 minWidth: 700,
                                 headingRowHeight: 52,
                                 dataRowHeight: 64,
+                                headingTextStyle: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
                                 columns: const [
                                   DataColumn2(
                                       label: Text('Naslov'),
@@ -341,6 +366,7 @@ class _NewsManagementScreenState extends State<NewsManagementScreen> {
                               ),
                           ],
                         ),
+            ),
             ),
           ),
         ],

@@ -76,6 +76,7 @@ class CategoryPopularityItem {
   final int enrollmentCount;
   final double revenue;
   final double averageRating;
+  final double? growthPercentage;
 
   CategoryPopularityItem({
     required this.categoryId,
@@ -84,6 +85,7 @@ class CategoryPopularityItem {
     required this.enrollmentCount,
     required this.revenue,
     required this.averageRating,
+    this.growthPercentage,
   });
 
   factory CategoryPopularityItem.fromJson(Map<String, dynamic> json) {
@@ -94,6 +96,7 @@ class CategoryPopularityItem {
       enrollmentCount: json['enrollmentCount'] as int? ?? 0,
       revenue: (json['revenue'] as num?)?.toDouble() ?? 0,
       averageRating: (json['averageRating'] as num?)?.toDouble() ?? 0,
+      growthPercentage: (json['growthPercentage'] as num?)?.toDouble(),
     );
   }
 }

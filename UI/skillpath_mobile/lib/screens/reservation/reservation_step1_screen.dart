@@ -75,10 +75,32 @@ class _ReservationStep1ScreenState extends State<ReservationStep1Screen> {
         ),
       );
     } else if (mounted) {
+      final error = reservationProvider.errorMessage ?? '';
+      // If a pending reservation already exists, find and reuse it
+      if (error.toLowerCase().contains('already have')) {
+        await reservationProvider.fetchUserReservations();
+        final existing = reservationProvider.activeReservations.firstWhere(
+          (r) => r.courseScheduleId == widget.schedule.id && r.status == 'Pending',
+          orElse: () => reservationProvider.activeReservations.firstWhere(
+            (r) => r.courseScheduleId == widget.schedule.id,
+          ),
+        );
+        if (mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ReservationStep2PaymentScreen(
+                reservation: existing,
+                course: widget.course,
+                schedule: widget.schedule,
+              ),
+            ),
+          );
+        }
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              reservationProvider.errorMessage ?? 'Greska prilikom kreiranja.'),
+          content: Text(error.isNotEmpty ? error : 'Greska prilikom kreiranja.'),
           backgroundColor: Colors.red.shade600,
           behavior: SnackBarBehavior.floating,
         ),
@@ -223,6 +245,10 @@ class _ReservationStep1ScreenState extends State<ReservationStep1Screen> {
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Unesite broj telefona.';
+                  }
+                  final phoneRegex = RegExp(r'^\+?[0-9\s\-]{8,15}$');
+                  if (!phoneRegex.hasMatch(value.trim())) {
+                    return 'Unesite ispravan broj telefona (npr. +38763123456).';
                   }
                   return null;
                 },

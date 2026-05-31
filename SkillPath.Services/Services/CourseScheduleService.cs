@@ -48,13 +48,29 @@ namespace SkillPath.Services.Services
             if (!courseExists)
                 throw new NotFoundException($"Course with ID {request.CourseId} not found.");
 
+            // Item 22: Safe TimeSpan parsing with validation
+            if (!TimeSpan.TryParse(request.StartTime, out var startTime))
+                throw new BusinessException("Neispravan format vremena pocetka. Koristite format HH:mm.");
+
+            if (!TimeSpan.TryParse(request.EndTime, out var endTime))
+                throw new BusinessException("Neispravan format vremena zavrsetka. Koristite format HH:mm.");
+
+            if (startTime >= endTime)
+                throw new BusinessException("Vrijeme pocetka mora biti prije vremena zavrsetka.");
+
+            if (request.StartDate > request.EndDate)
+                throw new BusinessException("Datum pocetka mora biti prije ili jednak datumu zavrsetka.");
+
+            if (request.MaxCapacity <= 0)
+                throw new BusinessException("Maksimalni kapacitet mora biti veci od 0.");
+
             var schedule = new CourseSchedule
             {
                 Id = Guid.NewGuid(),
                 CourseId = request.CourseId,
                 DayOfWeek = (DayOfWeek)request.DayOfWeek,
-                StartTime = TimeSpan.Parse(request.StartTime),
-                EndTime = TimeSpan.Parse(request.EndTime),
+                StartTime = startTime,
+                EndTime = endTime,
                 StartDate = request.StartDate,
                 EndDate = request.EndDate,
                 MaxCapacity = request.MaxCapacity,
@@ -87,13 +103,46 @@ namespace SkillPath.Services.Services
             if (schedule == null)
                 throw new NotFoundException($"CourseSchedule with ID {id} not found.");
 
-            if (request.CourseId.HasValue) schedule.CourseId = request.CourseId.Value;
+            if (request.CourseId.HasValue)
+            {
+                var courseExists = await _context.Courses.AnyAsync(c => c.Id == request.CourseId.Value);
+                if (!courseExists)
+                    throw new NotFoundException($"Course with ID {request.CourseId.Value} not found.");
+                schedule.CourseId = request.CourseId.Value;
+            }
             if (request.DayOfWeek.HasValue) schedule.DayOfWeek = (DayOfWeek)request.DayOfWeek.Value;
-            if (request.StartTime != null) schedule.StartTime = TimeSpan.Parse(request.StartTime);
-            if (request.EndTime != null) schedule.EndTime = TimeSpan.Parse(request.EndTime);
+
+            // Item 22: Safe TimeSpan parsing
+            if (request.StartTime != null)
+            {
+                if (!TimeSpan.TryParse(request.StartTime, out var startTime))
+                    throw new BusinessException("Neispravan format vremena pocetka. Koristite format HH:mm.");
+                schedule.StartTime = startTime;
+            }
+            if (request.EndTime != null)
+            {
+                if (!TimeSpan.TryParse(request.EndTime, out var endTime))
+                    throw new BusinessException("Neispravan format vremena zavrsetka. Koristite format HH:mm.");
+                schedule.EndTime = endTime;
+            }
+
+            if (schedule.StartTime >= schedule.EndTime)
+                throw new BusinessException("Vrijeme pocetka mora biti prije vremena zavrsetka.");
+
             if (request.StartDate.HasValue) schedule.StartDate = request.StartDate.Value;
             if (request.EndDate.HasValue) schedule.EndDate = request.EndDate.Value;
-            if (request.MaxCapacity.HasValue) schedule.MaxCapacity = request.MaxCapacity.Value;
+
+            if (schedule.StartDate > schedule.EndDate)
+                throw new BusinessException("Datum pocetka mora biti prije ili jednak datumu zavrsetka.");
+
+            if (request.MaxCapacity.HasValue)
+            {
+                if (request.MaxCapacity.Value <= 0)
+                    throw new BusinessException("Maksimalni kapacitet mora biti veci od 0.");
+                if (request.MaxCapacity.Value < schedule.CurrentEnrollment)
+                    throw new BusinessException($"Maksimalni kapacitet ne moze biti manji od trenutne zauzetosti ({schedule.CurrentEnrollment}).");
+                schedule.MaxCapacity = request.MaxCapacity.Value;
+            }
 
             await _context.SaveChangesAsync();
 

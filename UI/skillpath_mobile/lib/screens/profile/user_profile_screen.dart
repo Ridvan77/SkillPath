@@ -218,30 +218,46 @@ class UserProfileScreen extends StatelessWidget {
     final phoneController =
         TextEditingController(text: user.phoneNumber ?? '');
 
+    final formKey = GlobalKey<FormState>();
+
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Uredi profil'),
         content: SingleChildScrollView(
-          child: Column(
+          child: Form(
+            key: formKey,
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
+              TextFormField(
                 controller: firstNameController,
                 decoration: const InputDecoration(labelText: 'Ime'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Ime je obavezno' : null,
               ),
               const SizedBox(height: 12),
-              TextField(
+              TextFormField(
                 controller: lastNameController,
                 decoration: const InputDecoration(labelText: 'Prezime'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Prezime je obavezno' : null,
               ),
               const SizedBox(height: 12),
-              TextField(
+              TextFormField(
                 controller: phoneController,
                 decoration: const InputDecoration(labelText: 'Telefon'),
                 keyboardType: TextInputType.phone,
+                validator: (v) {
+                  if (v != null && v.trim().isNotEmpty) {
+                    final phoneRegex = RegExp(r'^\+?[0-9\s\-]{8,15}$');
+                    if (!phoneRegex.hasMatch(v.trim())) {
+                      return 'Unesite ispravan broj telefona (npr. +38763123456)';
+                    }
+                  }
+                  return null;
+                },
               ),
             ],
+          ),
           ),
         ),
         actions: [
@@ -251,6 +267,7 @@ class UserProfileScreen extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
               await auth.updateProfile(
                 firstName: firstNameController.text.trim(),
                 lastName: lastNameController.text.trim(),
@@ -271,35 +288,50 @@ class UserProfileScreen extends StatelessWidget {
     final currentPasswordController = TextEditingController();
     final newPasswordController = TextEditingController();
     final confirmPasswordController = TextEditingController();
+    final pwFormKey = GlobalKey<FormState>();
 
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Promjena lozinke'),
         content: SingleChildScrollView(
-          child: Column(
+          child: Form(
+            key: pwFormKey,
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
+              TextFormField(
                 controller: currentPasswordController,
                 obscureText: true,
                 decoration:
                     const InputDecoration(labelText: 'Trenutna lozinka'),
+                validator: (v) => (v == null || v.isEmpty) ? 'Unesite trenutnu lozinku' : null,
               ),
               const SizedBox(height: 12),
-              TextField(
+              TextFormField(
                 controller: newPasswordController,
                 obscureText: true,
                 decoration: const InputDecoration(labelText: 'Nova lozinka'),
+                validator: (v) {
+                  if (v == null || v.isEmpty) return 'Unesite novu lozinku';
+                  if (v.length < 4) return 'Lozinka mora imati najmanje 4 karaktera';
+                  return null;
+                },
               ),
               const SizedBox(height: 12),
-              TextField(
+              TextFormField(
                 controller: confirmPasswordController,
                 obscureText: true,
                 decoration:
                     const InputDecoration(labelText: 'Potvrda nove lozinke'),
+                validator: (v) {
+                  if (v == null || v.isEmpty) return 'Potvrdite novu lozinku';
+                  if (v != newPasswordController.text) return 'Lozinke se ne poklapaju';
+                  return null;
+                },
               ),
             ],
+          ),
           ),
         ),
         actions: [
@@ -309,16 +341,7 @@ class UserProfileScreen extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () async {
-              if (newPasswordController.text !=
-                  confirmPasswordController.text) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Lozinke se ne poklapaju.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                return;
-              }
+              if (!pwFormKey.currentState!.validate()) return;
 
               try {
                 final response = await ApiClient.put(

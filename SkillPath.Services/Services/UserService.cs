@@ -27,6 +27,8 @@ namespace SkillPath.Services.Services
 
         public async Task<PagedResult<UserDto>> GetAllAsync(int page, int pageSize, string? search, string? role)
         {
+            (page, pageSize) = Helpers.PaginationHelper.Normalize(page, pageSize);
+
             var query = _context.Users
                 .Include(u => u.City)
                 .AsQueryable();
@@ -69,28 +71,36 @@ namespace SkillPath.Services.Services
                 .Take(pageSize)
                 .ToListAsync();
 
-            var items = new List<UserDto>();
-            foreach (var user in users)
-            {
-                var roles = await _userManager.GetRolesAsync(user);
-                var reservationCount = await _context.Reservations.CountAsync(r => r.UserId == user.Id);
+            var userIds = users.Select(u => u.Id).ToList();
 
-                items.Add(new UserDto(
-                    user.Id,
-                    user.FirstName,
-                    user.LastName,
-                    user.Email ?? string.Empty,
-                    user.PhoneNumber,
-                    user.ProfileImageUrl,
-                    user.CityId,
-                    user.City?.Name,
-                    roles.ToList(),
-                    user.IsActive,
-                    user.CreatedAt,
-                    user.LastLoginAt,
-                    reservationCount
-                ));
-            }
+            // Item 24: Batch-load roles to avoid N+1
+            var userRoles = await _context.UserRoles
+                .Where(ur => userIds.Contains(ur.UserId))
+                .Join(_context.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, RoleName = r.Name })
+                .GroupBy(x => x.UserId)
+                .ToDictionaryAsync(g => g.Key, g => g.Select(x => x.RoleName ?? string.Empty).ToList());
+
+            // Item 24: Batch-load reservation counts
+            var reservationCounts = await _context.Reservations
+                .Where(r => userIds.Contains(r.UserId))
+                .GroupBy(r => r.UserId)
+                .ToDictionaryAsync(g => g.Key, g => g.Count());
+
+            var items = users.Select(user => new UserDto(
+                user.Id,
+                user.FirstName,
+                user.LastName,
+                user.Email ?? string.Empty,
+                user.PhoneNumber,
+                user.ProfileImageUrl,
+                user.CityId,
+                user.City?.Name,
+                userRoles.TryGetValue(user.Id, out var roles) ? roles : new List<string>(),
+                user.IsActive,
+                user.CreatedAt,
+                user.LastLoginAt,
+                reservationCounts.TryGetValue(user.Id, out var count) ? count : 0
+            )).ToList();
 
             return new PagedResult<UserDto>(items, page, pageSize, totalCount);
         }
@@ -183,10 +193,10 @@ namespace SkillPath.Services.Services
             if (user == null)
                 throw new NotFoundException($"User with ID {id} not found.");
 
-            _context.Users.Remove(user);
+            user.IsActive = false;
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("User {Id} permanently deleted", id);
+            _logger.LogInformation("User {Id} soft-deleted (deactivated)", id);
         }
     }
 }

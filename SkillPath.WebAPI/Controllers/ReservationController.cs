@@ -75,7 +75,12 @@ public class ReservationController : ControllerBase
     [HttpPost("{id:guid}/confirm")]
     public async Task<ActionResult<ReservationDto>> Confirm(Guid id, [FromBody] ConfirmReservationRequest request)
     {
-        var result = await _reservationService.ConfirmAsync(id, request.StripePaymentIntentId);
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userId == null) return Unauthorized();
+
+        var isAdmin = User.IsInRole("Admin");
+
+        var result = await _reservationService.ConfirmAsync(id, request.StripePaymentIntentId, userId, isAdmin);
         _logger.LogInformation("Reservation {ReservationId} confirmed.", id);
         return Ok(result);
     }
@@ -86,8 +91,25 @@ public class ReservationController : ControllerBase
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (userId == null) return Unauthorized();
 
-        var result = await _reservationService.CancelAsync(id, userId, request.Reason);
+        var isAdmin = User.IsInRole("Admin");
+
+        var result = await _reservationService.CancelAsync(id, userId, request.Reason, isAdmin);
         _logger.LogInformation("Reservation {ReservationId} cancelled by user {UserId}.", id, userId);
+        return Ok(result);
+    }
+
+    [HttpPost("{id:guid}/complete")]
+    [Authorize(Roles = "Admin,Instructor")]
+    public async Task<ActionResult<ReservationDto>> Complete(Guid id)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userId == null) return Unauthorized();
+
+        // Admin bypasses ownership check; instructors are validated in service
+        var isAdmin = User.IsInRole("Admin");
+
+        var result = await _reservationService.CompleteAsync(id, userId, isAdmin);
+        _logger.LogInformation("Reservation {ReservationId} completed.", id);
         return Ok(result);
     }
 }

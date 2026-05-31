@@ -26,11 +26,11 @@ import 'screens/instructor/instructor_home_screen.dart';
 import 'screens/instructor/instructor_reservations_screen.dart';
 import 'screens/instructor/instructor_reviews_screen.dart';
 import 'screens/profile/user_profile_screen.dart';
+import 'screens/news/news_screen.dart';
 import 'screens/reservation/my_reservations_screen.dart';
 
-// Global Stripe keys (to avoid NotInitializedError)
+// Only publishable key is safe for client-side use
 String? globalStripePublishableKey;
-String? globalStripeSecretKey;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,12 +38,6 @@ Future<void> main() async {
   // Initialize Firebase
   await Firebase.initializeApp();
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-
-  // Hide overflow indicators in debug mode
-  FlutterError.onError = (details) {
-    if (details.toString().contains('overflowed')) return;
-    FlutterError.presentError(details);
-  };
 
   // Load .env and initialize Stripe
   await _loadEnvAndInitStripe();
@@ -67,11 +61,9 @@ Future<void> _loadEnvAndInitStripe() async {
           envContent = null;
           debugPrint('[MAIN] .env loaded from file system');
         } catch (_) {
-          debugPrint('[MAIN] Using hardcoded fallback keys');
+          debugPrint('[MAIN] Using hardcoded fallback key');
           globalStripePublishableKey =
               'pk_test_51TRvTA9PC2svLpdcjr9zgKUEU28hpkUW5YVVYVexgjbsCKGwXRhVNBLMQI8ryNz6nVb86E8m4yJjE41Ja1q0VRQA00lpLHJb4K';
-          globalStripeSecretKey =
-              'sk_test_51TRvTA9PC2svLpdcNKAXJKMNo71658kMxG0s44ctfqKKKEeD9HkoPgCGg9uuFUUYUkQXH5RiPRIpOHX3u9QG5vWx00OzNplk0y';
         }
       } else {
         rethrow;
@@ -95,8 +87,6 @@ Future<void> _loadEnvAndInitStripe() async {
           }
           if (key == 'STRIPE_PUBLISHABLE_KEY') {
             globalStripePublishableKey = value;
-          } else if (key == 'STRIPE_SECRET_KEY') {
-            globalStripeSecretKey = value;
           }
         }
       }
@@ -105,17 +95,13 @@ Future<void> _loadEnvAndInitStripe() async {
     // Ensure globals are set from dotenv if not already
     try {
       globalStripePublishableKey ??= dotenv.env['STRIPE_PUBLISHABLE_KEY'];
-      globalStripeSecretKey ??= dotenv.env['STRIPE_SECRET_KEY'];
     } catch (_) {
       // dotenv access failed, use hardcoded fallback
       globalStripePublishableKey ??=
           'pk_test_51TRvTA9PC2svLpdcjr9zgKUEU28hpkUW5YVVYVexgjbsCKGwXRhVNBLMQI8ryNz6nVb86E8m4yJjE41Ja1q0VRQA00lpLHJb4K';
-      globalStripeSecretKey ??=
-          'sk_test_51TRvTA9PC2svLpdcNKAXJKMNo71658kMxG0s44ctfqKKKEeD9HkoPgCGg9uuFUUYUkQXH5RiPRIpOHX3u9QG5vWx00OzNplk0y';
     }
 
     debugPrint('[MAIN] STRIPE_PUBLISHABLE_KEY loaded: ${globalStripePublishableKey != null}');
-    debugPrint('[MAIN] STRIPE_SECRET_KEY loaded: ${globalStripeSecretKey != null}');
   } catch (e) {
     debugPrint('[MAIN] Warning: .env file not found or error loading: $e');
   }
@@ -236,6 +222,7 @@ class _MainScreenState extends State<MainScreen> {
       HomeScreen(),
       CourseListScreen(),
       MyReservationsScreen(),
+      NewsScreen(),
       UserProfileScreen(),
     ];
   }
@@ -280,6 +267,11 @@ class _MainScreenState extends State<MainScreen> {
         icon: Icon(Icons.calendar_today_outlined),
         activeIcon: Icon(Icons.calendar_today),
         label: 'Rezervacije',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.newspaper_outlined),
+        activeIcon: Icon(Icons.newspaper),
+        label: 'Vijesti',
       ),
       BottomNavigationBarItem(
         icon: Icon(Icons.person_outline),

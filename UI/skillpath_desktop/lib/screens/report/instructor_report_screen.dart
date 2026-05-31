@@ -51,7 +51,7 @@ class _InstructorReportScreenState extends State<InstructorReportScreen> {
 
   void _generateReport() {
     context.read<ReportProvider>().fetchInstructorReport(
-          instructorId: _selectedInstructorId,
+          instructorIds: _selectedInstructorId != null ? [_selectedInstructorId!] : null,
           from: _fromDate,
           to: _toDate,
         );

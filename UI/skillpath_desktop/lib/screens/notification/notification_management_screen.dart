@@ -76,17 +76,13 @@ class _NotificationManagementScreenState
 
   Future<void> _submitNotification(
     BuildContext ctx,
+    GlobalKey<FormState> formKey,
     TextEditingController titleCtrl,
     TextEditingController contentCtrl,
     int selectedType,
     String targetGroup,
   ) async {
-    if (titleCtrl.text.trim().isEmpty || contentCtrl.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Naslov i poruka su obavezni')),
-      );
-      return;
-    }
+    if (!formKey.currentState!.validate()) return;
     final scheduled = _scheduledDateTime;
     final success = await context
         .read<NotificationManagementProvider>()
@@ -114,6 +110,7 @@ class _NotificationManagementScreenState
     _scheduledDateTime = null;
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
     int selectedType = 0;
     String targetGroup = 'all';
 
@@ -128,7 +125,9 @@ class _NotificationManagementScreenState
               width: 550,
               padding: const EdgeInsets.all(32),
               child: SingleChildScrollView(
-                child: Column(
+                child: Form(
+                  key: formKey,
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -145,15 +144,21 @@ class _NotificationManagementScreenState
                       ],
                     ),
                     const SizedBox(height: 24),
-                    TextField(
+                    TextFormField(
                       controller: titleCtrl,
                       decoration: const InputDecoration(
                         labelText: 'Naslov *',
                         hintText: 'Unesite naslov notifikacije',
                       ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Naslov je obavezan';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 16),
-                    TextField(
+                    TextFormField(
                       controller: contentCtrl,
                       decoration: const InputDecoration(
                         labelText: 'Poruka *',
@@ -162,6 +167,12 @@ class _NotificationManagementScreenState
                       ),
                       maxLines: 3,
                       maxLength: 200,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Poruka je obavezna';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 16),
                     const Text('Tip notifikacije',
@@ -271,12 +282,13 @@ class _NotificationManagementScreenState
                             ? 'Zakaži'
                             : 'Pošalji'),
                         onPressed: () => _submitNotification(
-                          ctx, titleCtrl, contentCtrl, selectedType,
+                          ctx, formKey, titleCtrl, contentCtrl, selectedType,
                           targetGroup,
                         ),
                       ),
                     ),
                   ],
+                ),
                 ),
               ),
             ),

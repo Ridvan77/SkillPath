@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using SkillPath.Model;
+using SkillPath.Services.DTOs.City;
+using SkillPath.Services.Interfaces;
 
 namespace SkillPath.WebAPI.Controllers;
 
@@ -9,53 +9,63 @@ namespace SkillPath.WebAPI.Controllers;
 [Route("api/[controller]")]
 public class CityController : ControllerBase
 {
-    private readonly ApplicationDbContext _context;
+    private readonly ICityService _cityService;
     private readonly ILogger<CityController> _logger;
 
-    public CityController(ApplicationDbContext context, ILogger<CityController> logger)
+    public CityController(ICityService cityService, ILogger<CityController> logger)
     {
-        _context = context;
+        _cityService = cityService;
         _logger = logger;
     }
 
     [HttpGet]
     [AllowAnonymous]
-    public async Task<ActionResult> GetAll()
+    public async Task<ActionResult<List<CityDto>>> GetAll()
     {
-        var cities = await _context.Cities
-            .AsNoTracking()
-            .Select(c => new
-            {
-                c.Id,
-                c.Name,
-                c.CountryId,
-                CountryName = c.Country.Name
-            })
-            .OrderBy(c => c.Name)
-            .ToListAsync();
-
-        return Ok(cities);
+        var result = await _cityService.GetAllAsync();
+        return Ok(result);
     }
 
     [HttpGet("{id:int}")]
     [AllowAnonymous]
-    public async Task<ActionResult> GetById(int id)
+    public async Task<ActionResult<CityDto>> GetById(int id)
     {
-        var city = await _context.Cities
-            .AsNoTracking()
-            .Where(c => c.Id == id)
-            .Select(c => new
-            {
-                c.Id,
-                c.Name,
-                c.CountryId,
-                CountryName = c.Country.Name
-            })
-            .FirstOrDefaultAsync();
+        var result = await _cityService.GetByIdAsync(id);
+        return Ok(result);
+    }
 
-        if (city == null)
-            return NotFound();
+    [HttpGet("country/{countryId:int}")]
+    [AllowAnonymous]
+    public async Task<ActionResult<List<CityDto>>> GetByCountry(int countryId)
+    {
+        var result = await _cityService.GetByCountryAsync(countryId);
+        return Ok(result);
+    }
 
-        return Ok(city);
+    [HttpPost]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult<CityDto>> Create([FromBody] CityCreateRequest request)
+    {
+        var result = await _cityService.CreateAsync(request);
+        _logger.LogInformation("City {CityId} created.", result.Id);
+        return Created(string.Empty, result);
+    }
+
+    [HttpPut("{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult<CityDto>> Update(int id, [FromBody] CityCreateRequest request)
+    {
+        var result = await _cityService.UpdateAsync(id, request);
+        _logger.LogInformation("City {CityId} updated.", id);
+        return Ok(result);
+    }
+
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult> Delete(int id)
+    {
+        await _cityService.DeleteAsync(id);
+        _logger.LogInformation("City {CityId} deleted.", id);
+        return NoContent();
     }
 }

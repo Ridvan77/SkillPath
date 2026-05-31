@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+
 import 'package:provider/provider.dart';
 import 'package:skillpath_shared/skillpath_shared.dart';
 
@@ -284,6 +284,31 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
     }
   }
 
+  // Item 30: Print PDF via system print dialog
+  Future<void> _printPdf() async {
+    try {
+      // Reuse the existing export methods which save and open the PDF,
+      // then show a hint to use system print
+      await _exportPdf();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(Platform.isMacOS
+                ? 'PDF otvoren. Pritisnite ⌘P za ispis.'
+                : 'PDF otvoren. Pritisnite Ctrl+P za ispis.'),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Greška pri ispisu: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _exportPdf() async {
     if (_selectedType == _ReportType.instructor) {
       await _exportInstructorPdf();
@@ -382,7 +407,9 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                       c.coursesCount.toString(),
                       c.enrollmentCount.toString(),
                       c.revenue.toStringAsFixed(2),
-                      '+${(Random(c.categoryId).nextInt(21) + 5)}%',
+                      c.growthPercentage != null
+                          ? '${c.growthPercentage! >= 0 ? '+' : ''}${c.growthPercentage!.toStringAsFixed(1)}%'
+                          : 'N/A',
                     ])
                 .toList(),
             headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
@@ -603,15 +630,30 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                           const Text('Pregled Izvještaja',
                               style: AppTheme.headingSmall),
                           if (_hasReportData(provider))
-                            ElevatedButton.icon(
-                              onPressed: _exportPdf,
-                              icon: const Icon(Icons.download_rounded,
-                                  size: 18),
-                              label: const Text('Preuzmi PDF'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.success,
-                                foregroundColor: Colors.white,
-                              ),
+                            Row(
+                              children: [
+                                ElevatedButton.icon(
+                                  onPressed: _exportPdf,
+                                  icon: const Icon(Icons.download_rounded,
+                                      size: 18),
+                                  label: const Text('Preuzmi PDF'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.success,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton.icon(
+                                  onPressed: _printPdf,
+                                  icon: const Icon(Icons.print_rounded,
+                                      size: 18),
+                                  label: const Text('Ispis'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primary,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ],
                             ),
                         ],
                       ),
@@ -965,8 +1007,7 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                     ],
                     rows: data
                         .map((c) {
-                          final growth =
-                              Random(c.categoryId).nextInt(21) + 5;
+                          // Item 29: Real data only - no pseudo-random values
                           return DataRow(cells: [
                             DataCell(Text(c.categoryName,
                                 style: const TextStyle(
@@ -978,9 +1019,13 @@ class _ReportGenerationScreenState extends State<ReportGenerationScreen> {
                             DataCell(Text(
                                 '${c.revenue.toStringAsFixed(2)} KM')),
                             DataCell(Text(
-                              '+$growth%',
-                              style: const TextStyle(
-                                color: AppTheme.success,
+                              c.growthPercentage != null
+                                  ? '${c.growthPercentage! >= 0 ? '+' : ''}${c.growthPercentage!.toStringAsFixed(1)}%'
+                                  : 'N/A',
+                              style: TextStyle(
+                                color: c.growthPercentage != null && c.growthPercentage! >= 0
+                                    ? AppTheme.success
+                                    : Colors.red,
                                 fontWeight: FontWeight.w600,
                               ),
                             )),

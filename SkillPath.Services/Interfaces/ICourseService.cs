@@ -8,7 +8,7 @@ public interface ICourseService
     Task<PagedResult<CourseDto>> GetAllAsync(CourseSearchRequest request);
     Task<CourseDetailDto> GetByIdAsync(Guid id);
     Task<CourseDto> CreateAsync(CourseCreateRequest request);
-    Task<CourseDto> UpdateAsync(Guid id, CourseUpdateRequest request);
+    Task<CourseDto> UpdateAsync(Guid id, CourseUpdateRequest request, string userId, bool isAdmin);
     Task DeleteAsync(Guid id);
     Task<List<CourseDto>> GetInstructorCoursesAsync(string instructorId);
 }

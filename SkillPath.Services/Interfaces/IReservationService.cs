@@ -10,6 +10,7 @@ public interface IReservationService
     Task<ReservationDto> GetByIdAsync(Guid id);
     Task<PagedResult<ReservationDto>> GetUserReservationsAsync(string userId, ReservationStatus? status, int page, int pageSize);
     Task<ReservationDto> CreateAsync(string userId, ReservationCreateRequest request);
-    Task<ReservationDto> ConfirmAsync(Guid id, string stripePaymentIntentId);
-    Task<ReservationDto> CancelAsync(Guid id, string userId, string reason);
+    Task<ReservationDto> ConfirmAsync(Guid id, string stripePaymentIntentId, string userId, bool isAdmin);
+    Task<ReservationDto> CancelAsync(Guid id, string userId, string reason, bool isAdmin);
+    Task<ReservationDto> CompleteAsync(Guid id, string userId, bool isAdmin);
 }

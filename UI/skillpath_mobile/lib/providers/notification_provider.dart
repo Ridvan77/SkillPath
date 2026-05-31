@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ class NotificationProvider extends ChangeNotifier {
   int _unreadCount = 0;
   bool _isLoading = false;
   String? _errorMessage;
+  Timer? _pollingTimer;
 
   List<NotificationDto> get notifications => _notifications;
   int get unreadCount => _unreadCount;
@@ -16,6 +18,19 @@ class NotificationProvider extends ChangeNotifier {
 
   List<NotificationDto> get unreadNotifications =>
       _notifications.where((n) => !n.isRead).toList();
+
+  // Item 18: Start auto-refresh polling
+  void startPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      fetchNotifications();
+    });
+  }
+
+  void stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
 
   Future<void> fetchNotifications({bool? isRead}) async {
     _isLoading = true;
@@ -33,6 +48,11 @@ class NotificationProvider extends ChangeNotifier {
             PagedResult<NotificationDto>.fromJson(data, NotificationDto.fromJson);
         _notifications = paged.items;
         _unreadCount = _notifications.where((n) => !n.isRead).length;
+
+        // Start polling after first successful fetch
+        if (_pollingTimer == null) {
+          startPolling();
+        }
       } else {
         _errorMessage = 'Greska prilikom ucitavanja obavijesti.';
       }
@@ -82,5 +102,11 @@ class NotificationProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    stopPolling();
+    super.dispose();
   }
 }

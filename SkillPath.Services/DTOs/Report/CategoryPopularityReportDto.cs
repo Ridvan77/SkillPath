@@ -6,6 +6,7 @@ namespace SkillPath.Services.DTOs.Report
         int CoursesCount,
         int EnrollmentCount,
         decimal Revenue,
-        double AverageRating
+        double AverageRating,
+        double? GrowthPercentage = null
     );
 }

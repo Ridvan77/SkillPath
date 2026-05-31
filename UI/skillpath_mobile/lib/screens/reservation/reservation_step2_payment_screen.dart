@@ -1,16 +1,13 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:skillpath_shared/skillpath_shared.dart';
 
-import '../../main.dart' show globalStripePublishableKey, globalStripeSecretKey, MainScreen;
+import '../../main.dart' show globalStripePublishableKey, MainScreen;
 import '../../providers/reservation_provider.dart';
 
 class ReservationStep2PaymentScreen extends StatefulWidget {
@@ -76,11 +73,11 @@ class _ReservationStep2PaymentScreenState
     return NumberFormat.currency(locale: 'bs_BA', symbol: 'KM ').format(price);
   }
 
-  bool get _isStripeConfigured {
-    final key = globalStripeSecretKey;
-    return key != null &&
-        key.isNotEmpty &&
-        !key.contains('YOUR_KEY_HERE');
+  String? get _stripePublishableKey {
+    if (globalStripePublishableKey != null && globalStripePublishableKey!.isNotEmpty) {
+      return globalStripePublishableKey;
+    }
+    return null;
   }
 
   bool get _isDesktop {
@@ -91,120 +88,7 @@ class _ReservationStep2PaymentScreenState
     }
   }
 
-  String? get _stripeSecretKey {
-    if (globalStripeSecretKey != null && globalStripeSecretKey!.isNotEmpty) {
-      return globalStripeSecretKey;
-    }
-    try {
-      return dotenv.env['STRIPE_SECRET_KEY'];
-    } catch (_) {
-      return null;
-    }
-  }
-
-  String? get _stripePublishableKey {
-    if (globalStripePublishableKey != null && globalStripePublishableKey!.isNotEmpty) {
-      return globalStripePublishableKey;
-    }
-    try {
-      return dotenv.env['STRIPE_PUBLISHABLE_KEY'];
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // ── Stripe API Calls (4PawApp pattern: client-side) ──
-
-  Future<String?> _createStripeCustomer() async {
-    final secretKey = _stripeSecretKey;
-    if (secretKey == null) return null;
-
-    final response = await http.post(
-      Uri.parse('https://api.stripe.com/v1/customers'),
-      headers: {
-        'Authorization': 'Bearer $secretKey',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: {
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'metadata[address]': _addressController.text.trim(),
-        'metadata[city]': _cityController.text.trim(),
-        'metadata[country]': _countryController.text.trim(),
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['id'] as String?;
-    }
-    debugPrint('[STRIPE] Create customer failed: ${response.body}');
-    return null;
-  }
-
-  Future<String?> _createEphemeralKey(String customerId) async {
-    final secretKey = _stripeSecretKey;
-    if (secretKey == null) return null;
-
-    final response = await http.post(
-      Uri.parse('https://api.stripe.com/v1/ephemeral_keys'),
-      headers: {
-        'Authorization': 'Bearer $secretKey',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Stripe-Version': '2023-10-16',
-      },
-      body: {
-        'customer': customerId,
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['secret'] as String?;
-    }
-    debugPrint('[STRIPE] Create ephemeral key failed: ${response.body}');
-    return null;
-  }
-
-  Future<Map<String, String>?> _createPaymentIntent(String customerId) async {
-    final secretKey = _stripeSecretKey;
-    if (secretKey == null) return null;
-
-    final amountInCents =
-        (widget.reservation.totalAmount * 100).round().toString();
-
-    final response = await http.post(
-      Uri.parse('https://api.stripe.com/v1/payment_intents'),
-      headers: {
-        'Authorization': 'Bearer $secretKey',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: {
-        'amount': amountInCents,
-        'currency': 'bam',
-        'customer': customerId,
-        'payment_method_types[]': 'card',
-        'description': 'SkillPath Course Reservation - ${widget.course.title}',
-        'metadata[reservation_id]': widget.reservation.id,
-        'metadata[reservation_code]': widget.reservation.reservationCode,
-        'metadata[course_name]': widget.course.title,
-        'metadata[student_name]': _nameController.text.trim(),
-        'metadata[student_email]': _emailController.text.trim(),
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return {
-        'id': data['id'] as String,
-        'client_secret': data['client_secret'] as String,
-      };
-    }
-    debugPrint('[STRIPE] Create payment intent failed: ${response.body}');
-    return null;
-  }
-
-  // ── Payment Sheet Init & Present (4PawApp pattern) ──
+  // ── Payment Sheet Init & Present ──
 
   Future<void> _initAndPresentPaymentSheet({
     required String clientSecret,
@@ -246,10 +130,63 @@ class _ReservationStep2PaymentScreenState
     await Stripe.instance.presentPaymentSheet();
   }
 
-  // ── Main Payment Handler ──
+  // ── Item 28: Confirmation Dialog ──
+
+  Future<bool> _showPaymentConfirmationDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Potvrdite placanje'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Kurs: ${widget.course.title}',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text('Termin: ${widget.schedule.dayOfWeek} ${widget.schedule.startTime} - ${widget.schedule.endTime}'),
+            const SizedBox(height: 8),
+            Text('Period: ${DateFormat('dd.MM.yyyy').format(widget.schedule.startDate)} - ${DateFormat('dd.MM.yyyy').format(widget.schedule.endDate)}'),
+            const SizedBox(height: 12),
+            Text(
+              'Iznos: ${_formatPrice(widget.reservation.totalAmount)}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Da li zelite nastaviti sa placanjem?',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Otkazi'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Potvrdite placanje'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  // ── Main Payment Handler (Items 2, 3: All Stripe calls go through backend) ──
 
   Future<void> _handlePayment() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Item 28: Show confirmation dialog before payment
+    final confirmed = await _showPaymentConfirmationDialog();
+    if (!confirmed) return;
 
     setState(() {
       _isProcessing = true;
@@ -257,76 +194,82 @@ class _ReservationStep2PaymentScreenState
     });
 
     try {
-      String paymentIntentId = 'sim_${DateTime.now().millisecondsSinceEpoch}';
+      // Step 1: Call backend to create checkout (PaymentIntent + Customer + EphemeralKey)
+      debugPrint('[PAYMENT] Creating checkout via backend...');
+      final checkoutResponse = await ApiClient.post(
+        '/api/Payment/create-checkout',
+        {
+          'reservationId': widget.reservation.id,
+          'name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'address': _addressController.text.trim(),
+          'city': _cityController.text.trim(),
+          'country': _countryController.text.trim(),
+          'zipCode': _zipController.text.trim(),
+        },
+      );
 
-      if (_isStripeConfigured) {
+      if (checkoutResponse.statusCode != 200) {
+        String errorMsg = 'Greska prilikom kreiranja placanja.';
         try {
-          // Step 1: Create Stripe Customer
-          debugPrint('[PAYMENT] Creating Stripe customer...');
-          final customerId = await _createStripeCustomer();
-          if (customerId == null) {
-            throw Exception('Failed to create Stripe customer');
-          }
-          debugPrint('[PAYMENT] Customer created: $customerId');
-
-          // Step 2: Create Ephemeral Key
-          debugPrint('[PAYMENT] Creating ephemeral key...');
-          final ephemeralKey = await _createEphemeralKey(customerId);
-          if (ephemeralKey == null) {
-            throw Exception('Failed to create ephemeral key');
-          }
-          debugPrint('[PAYMENT] Ephemeral key created');
-
-          // Step 3: Create PaymentIntent
-          debugPrint('[PAYMENT] Creating PaymentIntent...');
-          final intentData = await _createPaymentIntent(customerId);
-          if (intentData == null) {
-            throw Exception('Failed to create PaymentIntent');
-          }
-          paymentIntentId = intentData['id']!;
-          final clientSecret = intentData['client_secret']!;
-          debugPrint('[PAYMENT] PaymentIntent created: $paymentIntentId');
-
-          // Step 4: Present PaymentSheet (mobile only)
-          if (_isDesktop) {
-            debugPrint(
-                '[PAYMENT] Desktop detected - skipping PaymentSheet, confirming with real PI');
-          } else {
-            debugPrint('[PAYMENT] Presenting PaymentSheet...');
-            await _initAndPresentPaymentSheet(
-              clientSecret: clientSecret,
-              ephemeralKey: ephemeralKey,
-              customerId: customerId,
-            );
-            debugPrint('[PAYMENT] PaymentSheet completed successfully');
-          }
-        } on StripeException catch (e) {
-          debugPrint('[PAYMENT] Stripe exception: ${e.error.message}');
-          if (e.error.code == FailureCode.Canceled) {
-            setState(() {
-              _errorMessage = 'Placanje je otkazano.';
-              _isProcessing = false;
-            });
-            return;
-          }
-          rethrow;
-        } catch (e) {
-          debugPrint('[PAYMENT] Stripe API error, falling back to simulated: $e');
-          paymentIntentId = 'sim_${DateTime.now().millisecondsSinceEpoch}';
-        }
-      } else {
-        debugPrint('[PAYMENT] Stripe keys not configured, simulating...');
+          final body = jsonDecode(checkoutResponse.body) as Map<String, dynamic>;
+          errorMsg = body['error']?['message'] as String? ?? errorMsg;
+        } catch (_) {}
+        throw Exception(errorMsg);
       }
 
-      // Confirm reservation on backend
+      final checkoutData = jsonDecode(checkoutResponse.body) as Map<String, dynamic>;
+      final clientSecret = checkoutData['clientSecret'] as String;
+      final paymentIntentId = checkoutData['paymentIntentId'] as String;
+      final ephemeralKeySecret = checkoutData['ephemeralKeySecret'] as String?;
+      final customerId = checkoutData['customerId'] as String?;
+
+      debugPrint('[PAYMENT] Checkout created: $paymentIntentId');
+
+      // Step 2: Present PaymentSheet (mobile only)
+      if (_isDesktop) {
+        debugPrint('[PAYMENT] Desktop detected - skipping PaymentSheet');
+      } else {
+        if (ephemeralKeySecret != null && customerId != null) {
+          debugPrint('[PAYMENT] Presenting PaymentSheet...');
+          await _initAndPresentPaymentSheet(
+            clientSecret: clientSecret,
+            ephemeralKey: ephemeralKeySecret,
+            customerId: customerId,
+          );
+          debugPrint('[PAYMENT] PaymentSheet completed successfully');
+        } else {
+          throw Exception('Stripe payment configuration incomplete.');
+        }
+      }
+
+      // Step 3: Confirm payment on backend
+      debugPrint('[PAYMENT] Confirming payment on backend...');
+      final confirmResponse = await ApiClient.post(
+        '/api/Payment/confirm',
+        {'paymentIntentId': paymentIntentId},
+      );
+
+      if (confirmResponse.statusCode != 200) {
+        throw Exception('Potvrda placanja nije uspjela.');
+      }
+
+      final confirmData = jsonDecode(confirmResponse.body) as Map<String, dynamic>;
+      final paymentStatus = confirmData['status'] as String?;
+
+      if (paymentStatus != 'Succeeded') {
+        throw Exception('Placanje nije uspjelo. Status: $paymentStatus');
+      }
+
+      // Step 4: Confirm reservation on backend
       if (mounted) {
         final reservationProvider = context.read<ReservationProvider>();
-        final confirmed = await reservationProvider.confirmReservation(
+        final reservationConfirmed = await reservationProvider.confirmReservation(
           widget.reservation.id,
           paymentIntentId,
         );
 
-        if (confirmed && mounted) {
+        if (reservationConfirmed && mounted) {
           setState(() => _paymentCompleted = true);
         } else if (mounted) {
           setState(() {
@@ -335,10 +278,27 @@ class _ReservationStep2PaymentScreenState
           });
         }
       }
-    } catch (e) {
+    } on StripeException catch (e) {
+      debugPrint('[PAYMENT] Stripe exception: ${e.error.message}');
+      if (e.error.code == FailureCode.Canceled) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Placanje je otkazano.';
+            _isProcessing = false;
+          });
+        }
+        return;
+      }
       if (mounted) {
         setState(() {
-          _errorMessage = 'Greska prilikom placanja. Pokusajte ponovo.';
+          _errorMessage = e.error.message ?? 'Greska prilikom placanja.';
+        });
+      }
+    } catch (e) {
+      debugPrint('[PAYMENT] Error: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
         });
       }
     } finally {
@@ -390,7 +350,7 @@ class _ReservationStep2PaymentScreenState
     );
   }
 
-  // ── Payment Success Screen (4PawApp ticket-style) ──
+  // ── Payment Success Screen ──
 
   Widget _buildPaymentSuccessScreen(Color primaryColor) {
     return SingleChildScrollView(
@@ -617,7 +577,7 @@ class _ReservationStep2PaymentScreenState
     );
   }
 
-  // ── Amount Card (4PawApp style) ──
+  // ── Amount Card ──
 
   Widget _buildAmountCard(Color primaryColor) {
     return Container(
@@ -751,7 +711,7 @@ class _ReservationStep2PaymentScreenState
     );
   }
 
-  // ── Billing Form (4PawApp style) ──
+  // ── Billing Form ──
 
   Widget _buildBillingForm(Color primaryColor) {
     return Container(
@@ -811,8 +771,12 @@ class _ReservationStep2PaymentScreenState
                 prefixIcon: Icon(Icons.email_outlined),
               ),
               keyboardType: TextInputType.emailAddress,
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Unesite email adresu' : null,
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Unesite email adresu';
+                final emailRegex = RegExp(r'^[\w\.-]+@[\w\.-]+\.\w{2,}$');
+                if (!emailRegex.hasMatch(v.trim())) return 'Unesite ispravan email';
+                return null;
+              },
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -909,9 +873,7 @@ class _ReservationStep2PaymentScreenState
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              _isStripeConfigured
-                  ? 'Desktop mod: PaymentIntent se kreira putem Stripe API, ali se PaymentSheet preskace.'
-                  : 'Desktop mod: Stripe kljucevi nisu konfigurisani. Placanje ce biti simulirano.',
+              'Desktop mod: PaymentSheet nije dostupan na desktop platformi.',
               style: TextStyle(color: Colors.orange.shade800, fontSize: 12),
             ),
           ),

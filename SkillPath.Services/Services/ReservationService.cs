@@ -35,6 +35,8 @@ namespace SkillPath.Services.Services
 
         public async Task<PagedResult<ReservationDto>> GetAllAsync(int page, int pageSize, string? search, ReservationStatus? status)
         {
+            (page, pageSize) = PaginationHelper.Normalize(page, pageSize);
+
             var query = _context.Reservations
                 .Include(r => r.User)
                 .Include(r => r.CourseSchedule)
@@ -132,6 +134,8 @@ namespace SkillPath.Services.Services
 
         public async Task<PagedResult<ReservationDto>> GetUserReservationsAsync(string userId, ReservationStatus? status, int page, int pageSize)
         {
+            (page, pageSize) = PaginationHelper.Normalize(page, pageSize);
+
             var query = _context.Reservations
                 .Include(r => r.User)
                 .Include(r => r.CourseSchedule)
@@ -281,7 +285,7 @@ namespace SkillPath.Services.Services
             return await GetByIdAsync(reservation.Id);
         }
 
-        public async Task<ReservationDto> ConfirmAsync(Guid id, string stripePaymentIntentId)
+        public async Task<ReservationDto> ConfirmAsync(Guid id, string stripePaymentIntentId, string userId, bool isAdmin)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.CourseSchedule)
@@ -292,31 +296,56 @@ namespace SkillPath.Services.Services
             if (reservation == null)
                 throw new NotFoundException($"Reservation with ID {id} not found.");
 
-            if (reservation.Status != ReservationStatus.Pending)
-                throw new BusinessException($"Cannot confirm reservation with status '{reservation.Status}'. Only Pending reservations can be confirmed.");
+            // Item 6: Ownership check
+            if (!isAdmin && reservation.UserId != userId)
+                throw new ForbiddenException("Nemate pristup ovoj rezervaciji.");
 
-            var oldStatus = reservation.Status;
-            reservation.Status = ReservationStatus.Active;
-            reservation.StripePaymentIntentId = stripePaymentIntentId;
+            // Item 15: State machine validation
+            ReservationStateMachine.ValidateTransition(reservation.Status, ReservationStatus.Active);
 
-            reservation.CourseSchedule.CurrentEnrollment++;
+            // Item 4: Server-side payment verification
+            var paymentResult = await _paymentService.ConfirmPaymentAsync(stripePaymentIntentId);
+            if (paymentResult.Status != PaymentStatus.Succeeded.ToString())
+                throw new BusinessException("Placanje nije uspjelo. Rezervacija nije mogla biti potvrdjena.");
 
-            var statusHistory = new ReservationStatusHistory
+            // Item 17: Re-check capacity at confirmation time
+            if (reservation.CourseSchedule.CurrentEnrollment >= reservation.CourseSchedule.MaxCapacity)
+                throw new BusinessException("Termin je u medjuvremenu popunjen.");
+
+            // Item 25: Use transaction for consistency
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
             {
-                Id = Guid.NewGuid(),
-                ReservationId = reservation.Id,
-                OldStatus = oldStatus,
-                NewStatus = ReservationStatus.Active,
-                ChangedAt = DateTime.UtcNow,
-                Note = "Payment confirmed"
-            };
-            _context.ReservationStatusHistories.Add(statusHistory);
+                var oldStatus = reservation.Status;
+                reservation.Status = ReservationStatus.Active;
+                reservation.StripePaymentIntentId = stripePaymentIntentId;
 
-            await _context.SaveChangesAsync();
+                reservation.CourseSchedule.CurrentEnrollment++;
+
+                var statusHistory = new ReservationStatusHistory
+                {
+                    Id = Guid.NewGuid(),
+                    ReservationId = reservation.Id,
+                    OldStatus = oldStatus,
+                    NewStatus = ReservationStatus.Active,
+                    ChangedAt = DateTime.UtcNow,
+                    ChangedById = userId,
+                    Note = "Payment confirmed"
+                };
+                _context.ReservationStatusHistories.Add(statusHistory);
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
 
             _logger.LogInformation("Reservation {Id} confirmed with PaymentIntent {PaymentIntentId}", id, stripePaymentIntentId);
 
-            // Notification
+            // Side effects outside transaction
             try
             {
                 await _notificationService.CreateSystemNotificationAsync(
@@ -332,7 +361,6 @@ namespace SkillPath.Services.Services
                 _logger.LogWarning(ex, "Failed to create confirmation notification for {Id}", id);
             }
 
-            // Email
             try
             {
                 var s = reservation.CourseSchedule;
@@ -360,7 +388,7 @@ namespace SkillPath.Services.Services
             return await GetByIdAsync(id);
         }
 
-        public async Task<ReservationDto> CancelAsync(Guid id, string userId, string reason)
+        public async Task<ReservationDto> CancelAsync(Guid id, string userId, string reason, bool isAdmin)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.CourseSchedule)
@@ -371,46 +399,133 @@ namespace SkillPath.Services.Services
             if (reservation == null)
                 throw new NotFoundException($"Reservation with ID {id} not found.");
 
-            if (reservation.Status != ReservationStatus.Active && reservation.Status != ReservationStatus.Pending)
-                throw new BusinessException($"Cannot cancel reservation with status '{reservation.Status}'. Only Active or Pending reservations can be cancelled.");
+            // Item 7: Ownership check
+            if (!isAdmin && reservation.UserId != userId)
+                throw new ForbiddenException("Nemate pristup ovoj rezervaciji.");
 
-            var oldStatus = reservation.Status;
             var wasActive = reservation.Status == ReservationStatus.Active;
 
-            reservation.Status = ReservationStatus.Cancelled;
-            reservation.CancelledAt = DateTime.UtcNow;
-            reservation.CancellationReason = reason;
-
+            // Item 10: Safe refund flow for paid reservations
             if (wasActive)
             {
-                reservation.CourseSchedule.CurrentEnrollment--;
-            }
+                // Item 15: State machine - Active -> CancellationPendingRefund
+                ReservationStateMachine.ValidateTransition(reservation.Status, ReservationStatus.CancellationPendingRefund);
 
-            var statusHistory = new ReservationStatusHistory
-            {
-                Id = Guid.NewGuid(),
-                ReservationId = reservation.Id,
-                OldStatus = oldStatus,
-                NewStatus = ReservationStatus.Cancelled,
-                ChangedAt = DateTime.UtcNow,
-                ChangedById = userId,
-                Note = $"Cancelled: {reason}"
-            };
-            _context.ReservationStatusHistories.Add(statusHistory);
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    var oldStatus = reservation.Status;
+                    reservation.Status = ReservationStatus.CancellationPendingRefund;
+                    reservation.CancelledAt = DateTime.UtcNow;
+                    reservation.CancellationReason = reason;
 
-            await _context.SaveChangesAsync();
+                    var statusHistory = new ReservationStatusHistory
+                    {
+                        Id = Guid.NewGuid(),
+                        ReservationId = reservation.Id,
+                        OldStatus = oldStatus,
+                        NewStatus = ReservationStatus.CancellationPendingRefund,
+                        ChangedAt = DateTime.UtcNow,
+                        ChangedById = userId,
+                        Note = $"Cancellation requested, refund in progress: {reason}"
+                    };
+                    _context.ReservationStatusHistories.Add(statusHistory);
 
-            if (wasActive)
-            {
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+
+                // Attempt refund
                 try
                 {
                     await _paymentService.RefundPaymentAsync(id, reason);
                     _logger.LogInformation("Refund processed for reservation {Id}", id);
+
+                    // Refund succeeded -> transition to Cancelled
+                    ReservationStateMachine.ValidateTransition(reservation.Status, ReservationStatus.Cancelled);
+                    reservation.Status = ReservationStatus.Cancelled;
+                    reservation.CourseSchedule.CurrentEnrollment--;
+
+                    var refundHistory = new ReservationStatusHistory
+                    {
+                        Id = Guid.NewGuid(),
+                        ReservationId = reservation.Id,
+                        OldStatus = ReservationStatus.CancellationPendingRefund,
+                        NewStatus = ReservationStatus.Cancelled,
+                        ChangedAt = DateTime.UtcNow,
+                        ChangedById = userId,
+                        Note = "Refund successful, reservation cancelled"
+                    };
+                    _context.ReservationStatusHistories.Add(refundHistory);
+                    await _context.SaveChangesAsync();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to process refund for reservation {Id}", id);
+                    _logger.LogError(ex, "Failed to process refund for reservation {Id}", id);
+
+                    // Refund failed -> transition to RefundFailed
+                    ReservationStateMachine.ValidateTransition(reservation.Status, ReservationStatus.RefundFailed);
+                    reservation.Status = ReservationStatus.RefundFailed;
+
+                    var failedHistory = new ReservationStatusHistory
+                    {
+                        Id = Guid.NewGuid(),
+                        ReservationId = reservation.Id,
+                        OldStatus = ReservationStatus.CancellationPendingRefund,
+                        NewStatus = ReservationStatus.RefundFailed,
+                        ChangedAt = DateTime.UtcNow,
+                        ChangedById = userId,
+                        Note = $"Refund failed: {ex.Message}"
+                    };
+                    _context.ReservationStatusHistories.Add(failedHistory);
+                    await _context.SaveChangesAsync();
+
+                    // Notify about refund failure
+                    try
+                    {
+                        await _notificationService.CreateSystemNotificationAsync(
+                            reservation.UserId,
+                            $"Refundacija neuspjesna - {reservation.CourseSchedule.Course.Title}",
+                            $"Refundacija za rezervaciju ({reservation.ReservationCode}) nije uspjela. Molimo kontaktirajte podrsku.",
+                            Model.Enums.NotificationType.Payment,
+                            reservation.Id.ToString(),
+                            "Reservation");
+                    }
+                    catch (Exception notifEx)
+                    {
+                        _logger.LogWarning(notifEx, "Failed to create refund failure notification for {Id}", id);
+                    }
+
+                    return await GetByIdAsync(id);
                 }
+            }
+            else
+            {
+                // Pending reservation - directly cancel (no payment to refund)
+                ReservationStateMachine.ValidateTransition(reservation.Status, ReservationStatus.Cancelled);
+
+                reservation.Status = ReservationStatus.Cancelled;
+                reservation.CancelledAt = DateTime.UtcNow;
+                reservation.CancellationReason = reason;
+
+                var statusHistory = new ReservationStatusHistory
+                {
+                    Id = Guid.NewGuid(),
+                    ReservationId = reservation.Id,
+                    OldStatus = ReservationStatus.Pending,
+                    NewStatus = ReservationStatus.Cancelled,
+                    ChangedAt = DateTime.UtcNow,
+                    ChangedById = userId,
+                    Note = $"Cancelled: {reason}"
+                };
+                _context.ReservationStatusHistories.Add(statusHistory);
+
+                await _context.SaveChangesAsync();
             }
 
             _logger.LogInformation("Reservation {Id} cancelled by user {UserId}. Reason: {Reason}", id, userId, reason);
@@ -422,7 +537,7 @@ namespace SkillPath.Services.Services
                     reservation.UserId,
                     $"Rezervacija otkazana - {reservation.CourseSchedule.Course.Title}",
                     $"Vasa rezervacija ({reservation.ReservationCode}) za kurs \"{reservation.CourseSchedule.Course.Title}\" je otkazana. Razlog: {reason}" +
-                    (wasActive ? $"\nRefundacija u iznosu od {reservation.TotalAmount:F2} KM je pokrenuta." : ""),
+                    (wasActive ? $"\nRefundacija u iznosu od {reservation.TotalAmount:F2} KM je uspjesno izvrsena." : ""),
                     Model.Enums.NotificationType.Reservation,
                     reservation.Id.ToString(),
                     "Reservation");
@@ -455,6 +570,62 @@ namespace SkillPath.Services.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to publish cancellation email for {Id}", id);
+            }
+
+            return await GetByIdAsync(id);
+        }
+
+        // Item 16: Complete reservation flow
+        public async Task<ReservationDto> CompleteAsync(Guid id, string userId, bool isAdmin)
+        {
+            var reservation = await _context.Reservations
+                .Include(r => r.CourseSchedule)
+                    .ThenInclude(cs => cs.Course)
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (reservation == null)
+                throw new NotFoundException($"Reservation with ID {id} not found.");
+
+            // Ownership check: instructor can only complete reservations for their courses
+            if (!isAdmin && reservation.CourseSchedule.Course.InstructorId != userId)
+                throw new ForbiddenException("Instruktor moze zavrsavati samo rezervacije za svoje kurseve.");
+
+            // Item 15: State machine validation
+            ReservationStateMachine.ValidateTransition(reservation.Status, ReservationStatus.Completed);
+
+            var oldStatus = reservation.Status;
+            reservation.Status = ReservationStatus.Completed;
+
+            var statusHistory = new ReservationStatusHistory
+            {
+                Id = Guid.NewGuid(),
+                ReservationId = reservation.Id,
+                OldStatus = oldStatus,
+                NewStatus = ReservationStatus.Completed,
+                ChangedAt = DateTime.UtcNow,
+                ChangedById = userId,
+                Note = "Course completed"
+            };
+            _context.ReservationStatusHistories.Add(statusHistory);
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Reservation {Id} marked as completed", id);
+
+            // Send review invitation notification
+            try
+            {
+                await _notificationService.CreateSystemNotificationAsync(
+                    reservation.UserId,
+                    $"Kurs zavrsen - {reservation.CourseSchedule.Course.Title}",
+                    $"Cestitamo! Zavrsili ste kurs \"{reservation.CourseSchedule.Course.Title}\". Ostavite recenziju i podijelite svoje iskustvo.",
+                    Model.Enums.NotificationType.Course,
+                    reservation.CourseSchedule.CourseId.ToString(),
+                    "Course");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to create completion notification for {Id}", id);
             }
 
             return await GetByIdAsync(id);

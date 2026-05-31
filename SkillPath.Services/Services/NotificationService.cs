@@ -26,6 +26,8 @@ namespace SkillPath.Services.Services
 
         public async Task<PagedResult<NotificationDto>> GetUserNotificationsAsync(string userId, bool? isRead, int page, int pageSize)
         {
+            (page, pageSize) = Helpers.PaginationHelper.Normalize(page, pageSize);
+
             var query = _context.Notifications
                 .Where(n => n.UserId == userId)
                 .AsQueryable();
@@ -230,6 +232,8 @@ namespace SkillPath.Services.Services
 
         public async Task<PagedResult<AdminNotificationDto>> GetAllNotificationsAsync(int page, int pageSize)
         {
+            (page, pageSize) = Helpers.PaginationHelper.Normalize(page, pageSize);
+
             var totalCount = await _context.BroadcastNotifications.CountAsync();
 
             var items = await _context.BroadcastNotifications

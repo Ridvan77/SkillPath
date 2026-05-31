@@ -46,19 +46,13 @@ namespace SkillPath.Services.Services
                 .ToListAsync();
             var reservedSet = reservedCourseIds.ToHashSet();
 
-            // Build vectors for all other active users
+            // Item 24: Batch-load all user vectors to avoid N+1 queries
             var allUserIds = await _context.Users
                 .Where(u => u.Id != userId && u.IsActive)
                 .Select(u => u.Id)
                 .ToListAsync();
 
-            var allVectors = new Dictionary<string, Dictionary<Guid, double>>();
-            foreach (var otherUserId in allUserIds)
-            {
-                var otherVector = await BuildUserVectorAsync(otherUserId);
-                if (otherVector.Count > 0)
-                    allVectors[otherUserId] = otherVector;
-            }
+            var allVectors = await BuildAllUserVectorsAsync(allUserIds);
 
             var courseScores = new Dictionary<Guid, double>();
             var courseExplanations = new Dictionary<Guid, string>();
@@ -145,17 +139,20 @@ namespace SkillPath.Services.Services
                 .Where(c => topCourseIds.Contains(c.Id) && c.IsActive)
                 .ToListAsync();
 
+            // Item 24: Batch-load review stats for all recommended courses
+            var allReviewStats = await _context.Reviews
+                .Where(r => topCourseIds.Contains(r.CourseId) && r.IsVisible)
+                .GroupBy(r => r.CourseId)
+                .Select(g => new { CourseId = g.Key, Avg = g.Average(r => (double)r.Rating), Count = g.Count() })
+                .ToDictionaryAsync(x => x.CourseId);
+
             var recommendations = new List<RecommendationDto>();
             foreach (var courseId in topCourseIds)
             {
                 var course = courses.FirstOrDefault(c => c.Id == courseId);
                 if (course == null) continue;
 
-                var reviewStats = await _context.Reviews
-                    .Where(r => r.CourseId == courseId && r.IsVisible)
-                    .GroupBy(r => r.CourseId)
-                    .Select(g => new { Avg = g.Average(r => (double)r.Rating), Count = g.Count() })
-                    .FirstOrDefaultAsync();
+                allReviewStats.TryGetValue(courseId, out var reviewStats);
 
                 recommendations.Add(new RecommendationDto(
                     course.Id,
@@ -179,6 +176,71 @@ namespace SkillPath.Services.Services
                 recommendations.Count(r => r.Explanation.Contains("Popularan")));
 
             return recommendations;
+        }
+
+        // Item 24: Batch vector builder - loads all signals in bulk queries instead of per-user
+        private async Task<Dictionary<string, Dictionary<Guid, double>>> BuildAllUserVectorsAsync(List<string> userIds)
+        {
+            var result = new Dictionary<string, Dictionary<Guid, double>>();
+            foreach (var uid in userIds)
+                result[uid] = new Dictionary<Guid, double>();
+
+            // Batch: Views
+            var allViews = await _context.UserCourseViews
+                .Where(v => userIds.Contains(v.UserId))
+                .GroupBy(v => new { v.UserId, v.CourseId })
+                .Select(g => new { g.Key.UserId, g.Key.CourseId, Count = g.Count() })
+                .ToListAsync();
+
+            foreach (var v in allViews)
+            {
+                if (!result.ContainsKey(v.UserId)) continue;
+                result[v.UserId][v.CourseId] = Math.Min(v.Count, 3);
+            }
+
+            // Batch: Favorites
+            var allFavorites = await _context.UserFavorites
+                .Where(f => userIds.Contains(f.UserId))
+                .Select(f => new { f.UserId, f.CourseId })
+                .ToListAsync();
+
+            foreach (var f in allFavorites)
+            {
+                if (!result.ContainsKey(f.UserId)) continue;
+                result[f.UserId].TryAdd(f.CourseId, 0);
+                result[f.UserId][f.CourseId] += 2;
+            }
+
+            // Batch: Reservations
+            var allReservations = await _context.Reservations
+                .Where(r => userIds.Contains(r.UserId) &&
+                           (r.Status == ReservationStatus.Active || r.Status == ReservationStatus.Completed))
+                .Select(r => new { r.UserId, CourseId = r.CourseSchedule.CourseId })
+                .Distinct()
+                .ToListAsync();
+
+            foreach (var r in allReservations)
+            {
+                if (!result.ContainsKey(r.UserId)) continue;
+                result[r.UserId].TryAdd(r.CourseId, 0);
+                result[r.UserId][r.CourseId] += 5;
+            }
+
+            // Batch: Reviews
+            var allReviews = await _context.Reviews
+                .Where(r => userIds.Contains(r.UserId))
+                .Select(r => new { r.UserId, r.CourseId, r.Rating })
+                .ToListAsync();
+
+            foreach (var review in allReviews)
+            {
+                if (!result.ContainsKey(review.UserId)) continue;
+                result[review.UserId].TryAdd(review.CourseId, 0);
+                result[review.UserId][review.CourseId] += review.Rating;
+            }
+
+            // Remove empty vectors
+            return result.Where(kv => kv.Value.Count > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
         }
 
         private async Task<Dictionary<Guid, double>> BuildUserVectorAsync(string userId)

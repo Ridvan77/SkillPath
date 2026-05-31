@@ -228,6 +228,8 @@ class _InstructorManagementScreenState
     final phoneCtrl =
         TextEditingController(text: instructor.phoneNumber ?? '');
 
+    final formKey = GlobalKey<FormState>();
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -235,7 +237,9 @@ class _InstructorManagementScreenState
         child: Container(
           width: 450,
           padding: const EdgeInsets.all(32),
-          child: Column(
+          child: Form(
+            key: formKey,
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -252,19 +256,30 @@ class _InstructorManagementScreenState
                 ],
               ),
               const SizedBox(height: 20),
-              TextField(
+              TextFormField(
                 controller: firstNameCtrl,
                 decoration: const InputDecoration(labelText: 'Ime'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Ime je obavezno' : null,
               ),
               const SizedBox(height: 12),
-              TextField(
+              TextFormField(
                 controller: lastNameCtrl,
                 decoration: const InputDecoration(labelText: 'Prezime'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Prezime je obavezno' : null,
               ),
               const SizedBox(height: 12),
-              TextField(
+              TextFormField(
                 controller: phoneCtrl,
                 decoration: const InputDecoration(labelText: 'Telefon'),
+                validator: (v) {
+                  if (v != null && v.trim().isNotEmpty) {
+                    final phoneRegex = RegExp(r'^\+?[0-9\s\-]{8,15}$');
+                    if (!phoneRegex.hasMatch(v.trim())) {
+                      return 'Unesite ispravan broj telefona (npr. +38763123456)';
+                    }
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 24),
               Row(
@@ -279,6 +294,7 @@ class _InstructorManagementScreenState
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () async {
+                        if (!formKey.currentState!.validate()) return;
                         final data = <String, dynamic>{
                           'firstName': firstNameCtrl.text.trim(),
                           'lastName': lastNameCtrl.text.trim(),
@@ -306,6 +322,7 @@ class _InstructorManagementScreenState
                 ],
               ),
             ],
+          ),
           ),
         ),
       ),

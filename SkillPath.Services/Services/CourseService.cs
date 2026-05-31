@@ -24,6 +24,8 @@ namespace SkillPath.Services.Services
 
         public async Task<PagedResult<CourseDto>> GetAllAsync(CourseSearchRequest request)
         {
+            (request.Page, request.PageSize) = Helpers.PaginationHelper.Normalize(request.Page, request.PageSize);
+
             var query = _context.Courses
                 .Include(c => c.Category)
                 .Include(c => c.Instructor)
@@ -137,6 +139,24 @@ namespace SkillPath.Services.Services
 
         public async Task<CourseDto> CreateAsync(CourseCreateRequest request)
         {
+            // Item 21: Service-layer business validations
+            var categoryExists = await _context.Categories.AnyAsync(c => c.Id == request.CategoryId);
+            if (!categoryExists)
+                throw new BusinessException("Odabrana kategorija ne postoji.");
+
+            var instructor = await _context.Users.FindAsync(request.InstructorId);
+            if (instructor == null)
+                throw new BusinessException("Odabrani instruktor ne postoji.");
+
+            if (!instructor.IsActive)
+                throw new BusinessException("Odabrani instruktor nije aktivan.");
+
+            var instructorRoles = await _context.UserRoles
+                .Join(_context.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.NormalizedName })
+                .AnyAsync(x => x.UserId == request.InstructorId && x.NormalizedName == "INSTRUCTOR");
+            if (!instructorRoles)
+                throw new BusinessException("Odabrani korisnik nema rolu instruktora.");
+
             var course = new Course
             {
                 Id = Guid.NewGuid(),
@@ -160,7 +180,7 @@ namespace SkillPath.Services.Services
             _logger.LogInformation("Course '{Title}' created with ID {Id}", course.Title, course.Id);
 
             var category = await _context.Categories.FindAsync(course.CategoryId);
-            var instructor = await _context.Users.FindAsync(course.InstructorId);
+            await _context.Entry(course).Reference(c => c.Instructor).LoadAsync();
 
             return new CourseDto(
                 course.Id,
@@ -182,7 +202,7 @@ namespace SkillPath.Services.Services
             );
         }
 
-        public async Task<CourseDto> UpdateAsync(Guid id, CourseUpdateRequest request)
+        public async Task<CourseDto> UpdateAsync(Guid id, CourseUpdateRequest request, string userId, bool isAdmin)
         {
             var course = await _context.Courses
                 .Include(c => c.Category)
@@ -191,6 +211,14 @@ namespace SkillPath.Services.Services
 
             if (course == null)
                 throw new NotFoundException($"Course with ID {id} not found.");
+
+            // Item 12: Instructor can only edit own courses
+            if (!isAdmin && course.InstructorId != userId)
+                throw new ForbiddenException("Instruktor moze uredjivati samo svoje kurseve.");
+
+            // Item 12: Only admin can change InstructorId
+            if (!isAdmin && request.InstructorId != null && request.InstructorId != course.InstructorId)
+                throw new ForbiddenException("Samo administrator moze promijeniti instruktora kursa.");
 
             if (request.Title != null) course.Title = request.Title;
             if (request.Description != null) course.Description = request.Description;

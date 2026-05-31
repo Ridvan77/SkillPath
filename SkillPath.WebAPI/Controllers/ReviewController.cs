@@ -31,7 +31,11 @@ public class ReviewController : ControllerBase
             ? User.FindFirst(ClaimTypes.NameIdentifier)?.Value
             : null;
 
-        var result = await _reviewService.GetCourseReviewsAsync(courseId, currentUserId, page, pageSize, includeHidden);
+        // Item 11: Only admins can see hidden reviews
+        var isAdmin = User.Identity?.IsAuthenticated == true && User.IsInRole("Admin");
+        var effectiveIncludeHidden = includeHidden && isAdmin;
+
+        var result = await _reviewService.GetCourseReviewsAsync(courseId, currentUserId, page, pageSize, effectiveIncludeHidden);
         return Ok(result);
     }
 

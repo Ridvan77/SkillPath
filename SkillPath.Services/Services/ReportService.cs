@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SkillPath.Model;
+using SkillPath.Model.Entities;
 using SkillPath.Model.Enums;
 using SkillPath.Services.DTOs.Report;
 using SkillPath.Services.Interfaces;
@@ -88,6 +89,7 @@ namespace SkillPath.Services.Services
 
             var categories = await categoriesQuery.ToListAsync();
 
+            // Current period reservations
             var reservationsQuery = _context.Reservations
                 .Include(r => r.CourseSchedule)
                 .Where(r => r.Status == ReservationStatus.Active || r.Status == ReservationStatus.Completed);
@@ -99,11 +101,37 @@ namespace SkillPath.Services.Services
 
             var reservations = await reservationsQuery.ToListAsync();
 
+            // Previous period reservations for growth calculation
+            List<Reservation>? previousReservations = null;
+            if (from.HasValue && to.HasValue)
+            {
+                var periodLength = to.Value - from.Value;
+                var previousFrom = from.Value - periodLength;
+                var previousTo = from.Value;
+
+                previousReservations = await _context.Reservations
+                    .Include(r => r.CourseSchedule)
+                    .Where(r => (r.Status == ReservationStatus.Active || r.Status == ReservationStatus.Completed)
+                                && r.CreatedAt >= previousFrom && r.CreatedAt < previousTo)
+                    .ToListAsync();
+            }
+
             var report = categories.Select(cat =>
             {
                 var courseIds = cat.Courses.Where(c => c.IsActive).Select(c => c.Id).ToHashSet();
                 var matchingReservations = reservations.Where(r => courseIds.Contains(r.CourseSchedule.CourseId)).ToList();
                 var visibleReviews = cat.Courses.SelectMany(c => c.Reviews).Where(r => r.IsVisible).ToList();
+
+                // Growth: compare enrollment count with previous period
+                double? growthPercentage = null;
+                if (previousReservations != null)
+                {
+                    var previousCount = previousReservations.Count(r => courseIds.Contains(r.CourseSchedule.CourseId));
+                    if (previousCount > 0)
+                        growthPercentage = ((double)(matchingReservations.Count - previousCount) / previousCount) * 100;
+                    else if (matchingReservations.Count > 0)
+                        growthPercentage = 100;
+                }
 
                 return new CategoryPopularityReportDto(
                     cat.Id,
@@ -111,7 +139,8 @@ namespace SkillPath.Services.Services
                     cat.Courses.Count(c => c.IsActive),
                     matchingReservations.Count,
                     matchingReservations.Sum(r => r.TotalAmount),
-                    visibleReviews.Any() ? visibleReviews.Average(r => (double)r.Rating) : 0
+                    visibleReviews.Any() ? visibleReviews.Average(r => (double)r.Rating) : 0,
+                    growthPercentage
                 );
             })
             .OrderByDescending(r => r.EnrollmentCount)

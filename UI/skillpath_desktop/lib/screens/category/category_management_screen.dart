@@ -68,6 +68,7 @@ class _CategoryManagementScreenState
     final descCtrl =
         TextEditingController(text: existing?.description ?? '');
     final isEdit = existing != null;
+    final formKey = GlobalKey<FormState>();
 
     showDialog(
       context: context,
@@ -75,20 +76,29 @@ class _CategoryManagementScreenState
         title: Text(isEdit ? 'Uredi kategoriju' : 'Nova kategorija'),
         content: SizedBox(
           width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Naziv'),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: descCtrl,
-                decoration: const InputDecoration(labelText: 'Opis'),
-                maxLines: 3,
-              ),
-            ],
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Naziv'),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Naziv je obavezan';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: descCtrl,
+                  decoration: const InputDecoration(labelText: 'Opis'),
+                  maxLines: 3,
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -98,6 +108,8 @@ class _CategoryManagementScreenState
           ),
           ElevatedButton(
             onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+
               final body = {
                 'name': nameCtrl.text.trim(),
                 'description': descCtrl.text.trim().isNotEmpty

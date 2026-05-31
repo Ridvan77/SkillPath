@@ -23,6 +23,8 @@ namespace SkillPath.Services.Services
 
         public async Task<CourseReviewsDto> GetCourseReviewsAsync(Guid courseId, string? currentUserId, int page, int pageSize, bool includeHidden = false)
         {
+            (page, pageSize) = Helpers.PaginationHelper.Normalize(page, pageSize);
+
             var courseExists = await _context.Courses.AnyAsync(c => c.Id == courseId);
             if (!courseExists)
                 throw new NotFoundException($"Course with ID {courseId} not found.");

@@ -26,10 +26,11 @@ namespace SkillPath.Services.Services
             _logger = logger;
             _configuration = configuration;
 
-            StripeConfiguration.ApiKey = _configuration["Stripe:SecretKey"];
+            StripeConfiguration.ApiKey = Environment.GetEnvironmentVariable("STRIPE_SECRET_KEY")
+                ?? _configuration["Stripe:SecretKey"];
         }
 
-        public async Task<PaymentIntentResponse> CreatePaymentIntentAsync(Guid reservationId)
+        public async Task<PaymentIntentResponse> CreatePaymentIntentAsync(Guid reservationId, string userId, CreateCheckoutRequest? billing = null)
         {
             var reservation = await _context.Reservations
                 .Include(r => r.CourseSchedule)
@@ -39,15 +40,75 @@ namespace SkillPath.Services.Services
             if (reservation == null)
                 throw new NotFoundException($"Reservation with ID {reservationId} not found.");
 
+            // Item 8: Ownership check
+            if (reservation.UserId != userId)
+                throw new ForbiddenException("Nemate pristup ovoj rezervaciji.");
+
             if (reservation.Status != ReservationStatus.Pending)
                 throw new BusinessException("Payment can only be created for pending reservations.");
 
+            // Item 9: Prevent duplicate payments
+            var existingPayment = await _context.Payments
+                .AnyAsync(p => p.ReservationId == reservationId &&
+                               (p.Status == PaymentStatus.Pending || p.Status == PaymentStatus.Succeeded));
+            if (existingPayment)
+                throw new BusinessException("Placanje za ovu rezervaciju je vec pokrenuto ili zavrseno.");
+
             var amountInSmallestUnit = (long)(reservation.TotalAmount * 100);
+
+            // Item 5: Create Stripe Customer server-side (moved from Flutter)
+            string? customerId = null;
+            string? ephemeralKeySecret = null;
+
+            try
+            {
+                var customerOptions = new CustomerCreateOptions
+                {
+                    Name = billing?.Name ?? $"{reservation.FirstName} {reservation.LastName}",
+                    Email = billing?.Email ?? reservation.Email,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        { "userId", userId },
+                        { "reservationId", reservationId.ToString() }
+                    }
+                };
+
+                if (billing?.Address != null || billing?.City != null || billing?.Country != null)
+                {
+                    customerOptions.Address = new AddressOptions
+                    {
+                        Line1 = billing?.Address,
+                        City = billing?.City,
+                        Country = billing?.Country == "Bosna i Hercegovina" ? "BA" : billing?.Country,
+                        PostalCode = billing?.ZipCode
+                    };
+                }
+
+                var customerService = new CustomerService();
+                var customer = await customerService.CreateAsync(customerOptions);
+                customerId = customer.Id;
+
+                // Create ephemeral key for the customer
+                var ephemeralKeyOptions = new EphemeralKeyCreateOptions
+                {
+                    Customer = customerId
+                };
+                var ephemeralKeyService = new EphemeralKeyService();
+                var requestOptions = new RequestOptions();
+                requestOptions.ApiKey = StripeConfiguration.ApiKey;
+                var ephemeralKey = await ephemeralKeyService.CreateAsync(ephemeralKeyOptions, requestOptions);
+                ephemeralKeySecret = ephemeralKey.Secret;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogWarning(ex, "Failed to create Stripe customer/ephemeral key for reservation {ReservationId}", reservationId);
+            }
 
             var options = new PaymentIntentCreateOptions
             {
                 Amount = amountInSmallestUnit,
                 Currency = "bam",
+                Customer = customerId,
                 Metadata = new Dictionary<string, string>
                 {
                     { "reservationId", reservationId.ToString() },
@@ -56,7 +117,16 @@ namespace SkillPath.Services.Services
             };
 
             var service = new PaymentIntentService();
-            var paymentIntent = await service.CreateAsync(options);
+            Stripe.PaymentIntent paymentIntent;
+            try
+            {
+                paymentIntent = await service.CreateAsync(options);
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Failed to create PaymentIntent for reservation {ReservationId}", reservationId);
+                throw new BusinessException("Kreiranje placanja nije uspjelo. Molimo pokusajte ponovo ili kontaktirajte podrsku.");
+            }
 
             var payment = new Payment
             {
@@ -79,7 +149,9 @@ namespace SkillPath.Services.Services
                 paymentIntent.ClientSecret,
                 paymentIntent.Id,
                 reservation.TotalAmount,
-                "BAM"
+                "BAM",
+                ephemeralKeySecret,
+                customerId
             );
         }
 
@@ -93,6 +165,18 @@ namespace SkillPath.Services.Services
 
             var service = new PaymentIntentService();
             var paymentIntent = await service.GetAsync(paymentIntentId);
+
+            // Item 4: Server-side verification - check metadata matches
+            if (paymentIntent.Metadata.TryGetValue("reservationId", out var metaReservationId))
+            {
+                if (metaReservationId != payment.ReservationId.ToString())
+                    throw new BusinessException("Payment verification failed: reservation ID mismatch.");
+            }
+
+            // Item 4: Verify amount matches
+            var expectedAmount = (long)(payment.Amount * 100);
+            if (paymentIntent.Amount != expectedAmount)
+                throw new BusinessException("Payment verification failed: amount mismatch.");
 
             if (paymentIntent.Status == "succeeded")
             {

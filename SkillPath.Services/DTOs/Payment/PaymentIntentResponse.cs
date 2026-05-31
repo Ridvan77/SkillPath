@@ -4,6 +4,8 @@ namespace SkillPath.Services.DTOs.Payment
         string ClientSecret,
         string PaymentIntentId,
         decimal Amount,
-        string Currency
+        string Currency,
+        string? EphemeralKeySecret = null,
+        string? CustomerId = null
     );
 }

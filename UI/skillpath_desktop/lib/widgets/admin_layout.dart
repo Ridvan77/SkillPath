@@ -13,6 +13,9 @@ import '../screens/review/review_management_screen.dart';
 import '../screens/notification/notification_management_screen.dart';
 import '../screens/report/report_generation_screen.dart';
 import '../screens/category/category_management_screen.dart';
+import '../screens/city/city_management_screen.dart';
+import '../screens/country/country_management_screen.dart';
+import '../screens/news/news_management_screen.dart';
 
 class AdminLayout extends StatefulWidget {
   final VoidCallback onLogout;
@@ -83,6 +86,12 @@ class _AdminLayoutState extends State<AdminLayout> {
         return const ReportGenerationScreen();
       case 8:
         return const CategoryManagementScreen();
+      case 9:
+        return const CityManagementScreen();
+      case 10:
+        return const CountryManagementScreen();
+      case 11:
+        return const NewsManagementScreen();
       default:
         return const DashboardScreen();
     }
